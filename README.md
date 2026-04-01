@@ -33,13 +33,10 @@ Flow:
 
 ## Future improvements
 
+- **Event ground truth integrations**: connect incident/launch feeds (for example Status updates, deploy events, product release webhooks) to strengthen timing-based correlation.
 - **R2 for raw feedback lake**: store original payloads, conversation exports, and long-term archives in R2, while keeping D1 focused on operational queries.
 - **Queues + Workflows for ingestion**: ingest feedback from many channels asynchronously with retry-safe pipelines and cleaner backpressure handling.
 - **Durable Objects for live analysis sessions**: support real-time collaborative triage rooms where PMs can review, pin, and annotate insights together.
-- **AI Gateway for model governance**: centralize model routing, caching, rate limits, and cost controls for all Workers AI calls.
-- **Turnstile + Access for secure intake**: protect external survey and feedback forms from abuse while keeping internal PM tools gated.
-- **Logpush/Analytics Engine observability**: track insight generation quality, latency, and usage patterns to continuously improve scoring.
-- **Event ground truth integrations**: connect incident/launch feeds (for example Status updates, deploy events, product release webhooks) to strengthen timing-based correlation.
 
 ## Local development
 
