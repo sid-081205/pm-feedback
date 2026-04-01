@@ -2,7 +2,6 @@ import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:work
 import type { Env } from '../index';
 import { type FeedbackRow } from '../lib/db';
 import { extractInsights } from '../lib/ai';
-import { upsertFeedbackVectors } from '../lib/vectorize';
 
 interface WorkflowParams {
   runId: string;
@@ -20,7 +19,7 @@ export class AnalyzeWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
         ).bind(new Date().toISOString(), runId).run();
       });
 
-      // Step 2: Load run parameters + query candidate feedback
+      // Step 2: Load run parameters + query a compact feedback sample
       const candidates = await step.do('query-feedback', async (): Promise<FeedbackRow[]> => {
         const run = await this.env.DB.prepare(
           'SELECT * FROM analysis_runs WHERE id=?'
@@ -38,7 +37,9 @@ export class AnalyzeWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
         if (filters.since)    { q += ' AND created_at >= ?'; params.push(filters.since); }
         if (filters.until)    { q += ' AND created_at <= ?'; params.push(filters.until); }
 
-        q += ' ORDER BY created_at DESC LIMIT 500';
+        const limit = Math.max(40, Math.min((run?.insight_count || 10) * 12, 120));
+        q += ' ORDER BY created_at DESC LIMIT ?';
+        params.push(limit);
         const result = await this.env.DB.prepare(q).bind(...params).all();
         return result.results as unknown as FeedbackRow[];
       });
@@ -50,31 +51,56 @@ export class AnalyzeWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
         return;
       }
 
-      // Step 3: Upsert embeddings into Vectorize
-      await step.do('upsert-vectors', async () => {
-        await upsertFeedbackVectors(
-          this.env.AI,
-          this.env.VECTORIZE,
-          this.env.DB,
-          candidates.map((f) => ({ id: f.id, source: f.source, category: f.category, text: f.text }))
-        );
-      });
-
-      // Step 4: Extract themes + scores via Workers AI
+      // Step 3: Build compact DB summaries and send them to Workers AI
       const run = await this.env.DB.prepare(
         'SELECT prompt, insight_count FROM analysis_runs WHERE id=?'
       ).bind(runId).first() as any;
+
+      const [categorySummary, sourceSummary] = await Promise.all([
+        this.env.DB.prepare(
+          `SELECT category, COUNT(*) AS count
+           FROM feedback
+           WHERE 1=1${candidates.length ? ` AND id IN (${candidates.map(() => '?').join(',')})` : ''}
+           GROUP BY category
+           ORDER BY count DESC`
+        ).bind(...candidates.map((f) => f.id)).all(),
+        this.env.DB.prepare(
+          `SELECT source, COUNT(*) AS count
+           FROM feedback
+           WHERE 1=1${candidates.length ? ` AND id IN (${candidates.map(() => '?').join(',')})` : ''}
+           GROUP BY source
+           ORDER BY count DESC`
+        ).bind(...candidates.map((f) => f.id)).all(),
+      ]);
+
+      const promptContext = {
+        user_prompt: run?.prompt || 'Analyze product feedback themes',
+        requested_insights: run?.insight_count || 10,
+        totals: {
+          feedback_items: candidates.length,
+          categories: (categorySummary.results as any[]).map((row) => ({ category: row.category, count: row.count })),
+          sources: (sourceSummary.results as any[]).map((row) => ({ source: row.source, count: row.count })),
+        },
+        feedback: candidates.map((f) => ({
+          id: f.id,
+          source: f.source,
+          category: f.category,
+          author: f.author,
+          created_at: f.created_at,
+          text: f.text,
+        })),
+      };
 
       const insights = await step.do('extract-insights', async () => {
         return extractInsights(
           this.env.AI,
           candidates.map((f) => ({ id: f.id, source: f.source, text: f.text })),
-          run?.prompt || 'Analyze product feedback themes',
+          JSON.stringify(promptContext),
           run?.insight_count || 10
         );
       });
 
-      // Step 5: Write insights + links to D1
+      // Step 4: Write insights + links to D1
       await step.do('write-insights', async () => {
         const now = new Date().toISOString();
         const stmts: D1PreparedStatement[] = [];
@@ -112,121 +138,7 @@ export class AnalyzeWorkflow extends WorkflowEntrypoint<Env, WorkflowParams> {
         if (stmts.length > 0) await this.env.DB.batch(stmts);
       });
 
-      // Step 6: Compute daily_feedback_metrics
-      await step.do('compute-metrics', async () => {
-        // Aggregate feedback by day from candidates
-        const dayMap = new Map<string, { total: number; byCategory: Record<string, number>; bySource: Record<string, number> }>();
-
-        for (const f of candidates) {
-          const day = f.created_at.split('T')[0];
-          if (!dayMap.has(day)) dayMap.set(day, { total: 0, byCategory: {}, bySource: {} });
-          const entry = dayMap.get(day)!;
-          entry.total++;
-          if (f.category) entry.byCategory[f.category] = (entry.byCategory[f.category] || 0) + 1;
-          if (f.source) entry.bySource[f.source] = (entry.bySource[f.source] || 0) + 1;
-        }
-
-        const stmts: D1PreparedStatement[] = [];
-        for (const [day, data] of dayMap) {
-          stmts.push(
-            this.env.DB.prepare(
-              `INSERT OR REPLACE INTO daily_feedback_metrics (day,run_id,total_count,by_category_json,by_source_json)
-               VALUES (?,?,?,?,?)`
-            ).bind(day, runId, data.total, JSON.stringify(data.byCategory), JSON.stringify(data.bySource))
-          );
-        }
-        if (stmts.length > 0) await this.env.DB.batch(stmts);
-      });
-
-      // Step 7: Compute segment metrics
-      await step.do('compute-segments', async () => {
-        // Group candidates by segment key
-        const segMap = new Map<string, { byCategory: Record<string, number>; insightCounts: Record<string, number> }>();
-
-        for (const f of candidates) {
-          const industry = f.industry || 'unknown';
-          const size = f.company_size_bucket || 'unknown';
-          const tier = f.plan_tier || 'unknown';
-          const key = `industry=${industry}|size=${size}|tier=${tier}`;
-
-          if (!segMap.has(key)) segMap.set(key, { byCategory: {}, insightCounts: {} });
-          const entry = segMap.get(key)!;
-          if (f.category) entry.byCategory[f.category] = (entry.byCategory[f.category] || 0) + 1;
-        }
-
-        const stmts: D1PreparedStatement[] = [];
-        for (const [key, data] of segMap) {
-          const topInsights = Object.entries(data.insightCounts)
-            .sort(([, a], [, b]) => b - a)
-            .slice(0, 3)
-            .map(([id, count]) => ({ id, count }));
-
-          stmts.push(
-            this.env.DB.prepare(
-              `INSERT OR REPLACE INTO segment_issue_metrics (run_id,segment_key,top_insights_json,by_category_json)
-               VALUES (?,?,?,?)`
-            ).bind(runId, key, JSON.stringify(topInsights), JSON.stringify(data.byCategory))
-          );
-        }
-        if (stmts.length > 0) await this.env.DB.batch(stmts);
-      });
-
-      // Step 8: Correlate with events
-      await step.do('correlate-events', async () => {
-        const eventsResult = await this.env.DB.prepare('SELECT * FROM events ORDER BY start_time DESC LIMIT 20').all();
-        const events = eventsResult.results as any[];
-        if (events.length === 0) return;
-
-        // Get newly-created insights for this run
-        const insightsResult = await this.env.DB.prepare(
-          'SELECT id, title FROM insights WHERE run_id=?'
-        ).bind(runId).all();
-        const runInsights = insightsResult.results as any[];
-
-        const stmts: D1PreparedStatement[] = [];
-        for (const event of events) {
-          const windowStart = event.start_time;
-          const windowEnd = event.end_time || new Date(new Date(windowStart).getTime() + 86400000).toISOString();
-
-          // Count feedback in event window
-          const countResult = await this.env.DB.prepare(
-            'SELECT COUNT(*) as cnt FROM feedback WHERE created_at BETWEEN ? AND ?'
-          ).bind(windowStart, windowEnd).first() as any;
-
-          const windowCount = countResult?.cnt || 0;
-          if (windowCount === 0) continue;
-
-          // Simple correlation: include insights that have feedback in the event window
-          const relatedInsights = [];
-          for (const ins of runInsights.slice(0, 3)) {
-            const linkCount = await this.env.DB.prepare(
-              `SELECT COUNT(*) as cnt FROM insight_feedback lnk
-               JOIN feedback f ON f.id=lnk.feedback_id
-               WHERE lnk.insight_id=? AND f.created_at BETWEEN ? AND ?`
-            ).bind(ins.id, windowStart, windowEnd).first() as any;
-
-            if ((linkCount?.cnt || 0) > 0) {
-              relatedInsights.push({ id: ins.id, title: ins.title, count: linkCount.cnt });
-            }
-          }
-
-          if (relatedInsights.length > 0) {
-            stmts.push(
-              this.env.DB.prepare(
-                `INSERT OR REPLACE INTO event_correlations (run_id,event_id,related_insights_json,notes)
-                 VALUES (?,?,?,?)`
-              ).bind(
-                runId, event.id,
-                JSON.stringify(relatedInsights),
-                `${windowCount} feedback item(s) in event window`
-              )
-            );
-          }
-        }
-        if (stmts.length > 0) await this.env.DB.batch(stmts);
-      });
-
-      // Step 9: Mark succeeded
+      // Step 5: Mark succeeded
       await step.do('mark-succeeded', async () => {
         await this.env.DB.prepare(
           `UPDATE analysis_runs SET status='succeeded', finished_at=? WHERE id=?`

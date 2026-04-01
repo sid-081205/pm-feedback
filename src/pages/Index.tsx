@@ -13,7 +13,7 @@ import { AskAIDialog } from "@/components/AskAIDialog";
 import { AskAISimpleDialog } from "@/components/AskAISimpleDialog";
 import { useInsights } from "@/hooks/use-insights";
 import { useFeedback } from "@/hooks/use-feedback";
-import { initialInsights, initialFeedback, categoryLabels, type Insight, type Source, type Category, type Sentiment } from "@/data/mock-data";
+import { categoryLabels, type Insight, type Sentiment } from "@/data/mock-data";
 import { categoryColors } from "@/data/category-styles";
 import { Search, Sparkles, BarChart2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,26 +34,22 @@ const Index = () => {
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [selectedInsight, setSelectedInsight] = useState<Insight | null>(null);
   const [askAIOpen, setAskAIOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
 
-  const { data: apiData, isLoading } = useInsights({ search, source: sourceFilter, category: categoryFilter });
+  const { data: apiData, isLoading } = useInsights({
+    search,
+    source: sourceFilter,
+    category: categoryFilter,
+    runId: activeRunId ?? undefined,
+  });
   const { data: feedbackData } = useFeedback();
 
-  // Use API data when available, fall back to filtered mock data
-  const insights = useMemo(() => {
-    if (apiData?.insights) return apiData.insights;
-    return initialInsights.filter((insight) => {
-      const matchSearch = !search || insight.title.toLowerCase().includes(search.toLowerCase()) ||
-        insight.topics.some((t) => t.label.toLowerCase().includes(search.toLowerCase()));
-      const matchSource = sourceFilter === "all" || insight.sources.includes(sourceFilter as Source);
-      const matchCategory = categoryFilter === "all" || insight.category === categoryFilter;
-      return matchSearch && matchSource && matchCategory;
-    });
-  }, [apiData, search, sourceFilter, categoryFilter]);
+  const insights = apiData?.insights ?? [];
 
-  const allFeedback = feedbackData?.feedback ?? initialFeedback;
+  const allFeedback = feedbackData?.feedback ?? [];
 
   return (
     <div className="p-6">
@@ -158,6 +154,12 @@ const Index = () => {
                   </TableCell>
                 </TableRow>
               ))
+            ) : insights.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-14 text-center text-sm text-muted-foreground">
+                  No insights yet. Generate a new run to populate this view.
+                </TableCell>
+              </TableRow>
             ) : (
               insights.map((insight) => (
                 <TableRow
@@ -218,7 +220,14 @@ const Index = () => {
       />
 
       <AskAISimpleDialog open={askAIOpen} onClose={() => setAskAIOpen(false)} />
-      <AskAIDialog open={generateOpen} onClose={() => setGenerateOpen(false)} />
+      <AskAIDialog
+        open={generateOpen}
+        onClose={() => setGenerateOpen(false)}
+        onRunCompleted={(runId) => {
+          setActiveRunId(runId);
+          setSelectedInsight(null);
+        }}
+      />
     </div>
   );
 };

@@ -4,6 +4,27 @@ import { json, mapFeedback, type FeedbackRow } from '../lib/db';
 export async function handleFeedback(request: Request, env: Env, path: string): Promise<Response> {
   const url = new URL(request.url);
 
+  // POST /feedback/reset — clear all persisted analysis/data tables
+  if (request.method === 'POST' && path === '/feedback/reset') {
+    const tables = [
+      'insight_feedback',
+      'daily_feedback_metrics',
+      'segment_issue_metrics',
+      'event_correlations',
+      'insights',
+      'analysis_runs',
+      'feedback_embeddings',
+      'events',
+      'feedback',
+    ];
+
+    for (const table of tables) {
+      await env.DB.prepare(`DELETE FROM ${table}`).run();
+    }
+
+    return json({ reset: true }, 200);
+  }
+
   // GET /feedback or GET /feedback?search=&source=&category=&limit=&cursor=
   if (request.method === 'GET' && (path === '/feedback' || path === '/feedback/')) {
     const search = url.searchParams.get('search') || '';

@@ -11,11 +11,13 @@ export function useInsights(filters?: {
   search?: string;
   source?: string;
   category?: string;
+  runId?: string;
 }) {
   const params = new URLSearchParams();
   if (filters?.search)   params.set('search', filters.search);
   if (filters?.source && filters.source !== 'all')   params.set('source', filters.source);
   if (filters?.category && filters.category !== 'all') params.set('category', filters.category);
+  if (filters?.runId) params.set('runId', filters.runId);
   params.set('limit', '100');
 
   return useQuery<InsightsResponse>({

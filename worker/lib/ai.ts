@@ -80,10 +80,15 @@ Scoring guidance:
 - urgency_score: frequency velocity, source diversity, sentiment intensity, keyword signals ("blocked","P0","outage","regression"), event correlation
 - value_score: impact breadth, segment weight, revenue keywords ("contract","renewal","enterprise","churn"), effort estimate, unique author ratio`;
 
+  const isStructuredContext = prompt.trim().startsWith('{');
+  const promptBlock = isStructuredContext
+    ? `Analysis context:\n${prompt}`
+    : `Prompt: ${prompt}`;
+
   const result = await ai.run(LLM_MODEL as any, {
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Prompt: ${prompt}\n\nFeedback:\n${feedbackBlock}` },
+      { role: 'user', content: `${promptBlock}\n\nFeedback:\n${feedbackBlock}` },
     ],
     max_tokens: 4096,
   } as any) as any;

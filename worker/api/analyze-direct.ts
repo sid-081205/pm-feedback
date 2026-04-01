@@ -16,7 +16,7 @@ export async function handleAnalyzeDirect(request: Request, env: Env): Promise<R
     return new Response(JSON.stringify({ error: 'Invalid JSON' }), { status: 400 });
   }
 
-  const { prompt, insightCount = 10 } = body;
+  const { prompt, insightCount = 10, filters = {} } = body;
   if (!prompt) {
     return new Response(JSON.stringify({ error: 'prompt is required' }), { status: 400 });
   }
@@ -29,10 +29,32 @@ export async function handleAnalyzeDirect(request: Request, env: Env): Promise<R
         // Step 0 — start
         send({ step: 0, label: 'Connecting to D1 database…' });
 
-        // Step 1 — fetch feedback (real async work)
-        const feedbackResult = await env.DB.prepare(
-          `SELECT * FROM feedback ORDER BY created_at DESC LIMIT 120`
-        ).all();
+        // Step 1 — fetch filtered feedback directly from D1
+        let q = 'SELECT * FROM feedback WHERE 1=1';
+        const params: (string | number)[] = [];
+
+        if (Array.isArray(filters.sources) && filters.sources.length > 0) {
+          q += ` AND source IN (${filters.sources.map(() => '?').join(',')})`;
+          params.push(...filters.sources);
+        }
+        if (filters.category) {
+          q += ' AND category = ?';
+          params.push(filters.category);
+        }
+        if (filters.since) {
+          q += ' AND created_at >= ?';
+          params.push(filters.since);
+        }
+        if (filters.until) {
+          q += ' AND created_at <= ?';
+          params.push(filters.until);
+        }
+
+        const limit = Math.max(30, Math.min(Number(insightCount) * 10 || 60, 120));
+        q += ' ORDER BY created_at DESC LIMIT ?';
+        params.push(limit);
+
+        const feedbackResult = await env.DB.prepare(q).bind(...params).all();
         const feedbackItems = (feedbackResult.results as unknown as FeedbackRow[]).map(mapFeedback);
 
         if (feedbackItems.length === 0) {
@@ -41,14 +63,40 @@ export async function handleAnalyzeDirect(request: Request, env: Env): Promise<R
           return;
         }
 
-        send({ step: 1, label: `Fetched ${feedbackItems.length} feedback items from D1` });
+        send({ step: 1, label: `Fetched ${feedbackItems.length} filtered feedback items from D1` });
 
-        // Step 2 — call Workers AI (real async work, can take 10-30s)
-        const feedbackContext = feedbackItems
-          .map((f, i) => `${i + 1}. [${f.source}] [${f.category}] "${f.text}" — ${f.author}`)
-          .join('\n');
+        const categoryCounts = feedbackItems.reduce((acc, item) => {
+          acc[item.category] = (acc[item.category] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
 
-        send({ step: 2, label: `Sending ${feedbackItems.length} items to Workers AI…` });
+        const sourceCounts = feedbackItems.reduce((acc, item) => {
+          acc[item.source] = (acc[item.source] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+
+        const queryContext = {
+          user_prompt: prompt,
+          requested_insights: insightCount,
+          filters,
+          totals: {
+            feedback_items: feedbackItems.length,
+            categories: categoryCounts,
+            sources: sourceCounts,
+          },
+          feedback: feedbackItems.map((f, i) => ({
+            index: i + 1,
+            id: f.id,
+            source: f.source,
+            category: f.category,
+            author: f.author,
+            created_at: f.created_at,
+            text: f.text,
+          })),
+        };
+
+        // Step 2 — call Workers AI once with the compact D1 context
+        send({ step: 2, label: `Sending D1 context to Workers AI…` });
 
         const aiResult = await env.AI.run(LLM_MODEL as any, {
           messages: [
@@ -70,18 +118,20 @@ Return ONLY valid JSON — no markdown, no prose — in this exact shape:
   ]
 }
 Rules:
-- Generate exactly ${insightCount} distinct insights
-- Focus on: ${prompt}
+  - Generate exactly ${insightCount} distinct insights
+  - Focus on: ${prompt}
 - urgency_score: how urgently this needs addressing (100=critical/blocking, 0=nice-to-have)
 - value_score: business value of addressing this (100=highest, 0=minimal)
-- feedback_indices: 1-based indices of feedback items supporting each insight`,
+  - feedback_indices: 1-based indices of feedback items supporting each insight
+  - Use only the feedback items in the provided context
+  - Prefer concise, merged themes over overly granular duplicates`,
             },
             {
               role: 'user',
-              content: `Analyze this feedback (${feedbackItems.length} items) and extract ${insightCount} insights:\n\n${feedbackContext}`,
+                content: `Analysis context:\n${JSON.stringify(queryContext)}`,
             },
           ],
-          max_tokens: 3000,
+            max_tokens: 2600,
         } as any) as any;
 
         // Step 3 — parse AI response (real work done)
@@ -103,8 +153,8 @@ Rules:
           return;
         }
 
-        // Step 4 — write to D1 (real async work)
-        send({ step: 4, label: `Writing ${parsedInsights.length} insights to database…` });
+        // Step 3 — write to D1
+        send({ step: 3, label: `Writing ${parsedInsights.length} insights to database…` });
 
         const runId = crypto.randomUUID();
         const now = new Date().toISOString();
@@ -149,9 +199,9 @@ Rules:
         }
         if (linkStmts.length > 0) await env.DB.batch(linkStmts);
 
-        // Step 5 — done
+        // Step 4 — done
         send({
-          step: 5,
+          step: 4,
           label: `Done — ${parsedInsights.length} insights saved`,
           done: true,
           runId,

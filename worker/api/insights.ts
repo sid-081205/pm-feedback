@@ -104,6 +104,7 @@ ${feedbackSamples}`,
     const search = url.searchParams.get('search') || '';
     const source = url.searchParams.get('source') || '';
     const category = url.searchParams.get('category') || '';
+    const runId = url.searchParams.get('runId') || '';
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
     const cursor = url.searchParams.get('cursor') || '';
 
@@ -114,6 +115,7 @@ ${feedbackSamples}`,
       q += ' AND (i.title LIKE ? OR i.topics_json LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
+    if (runId) { q += ' AND i.run_id = ?'; params.push(runId); }
     if (category) { q += ' AND i.category = ?'; params.push(category); }
     if (source) {
       q += ' AND EXISTS (SELECT 1 FROM insight_feedback lnk2 JOIN feedback f2 ON f2.id=lnk2.feedback_id WHERE lnk2.insight_id=i.id AND f2.source=?)';

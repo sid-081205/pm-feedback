@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { SourceIcon } from "@/components/SourceIcon";
 import { FeedbackDetailPanel } from "@/components/FeedbackDetailPanel";
 import { useFeedback, useAddFeedback, useSeedFeedback } from "@/hooks/use-feedback";
-import { initialFeedback, sourceLabels, categoryLabels, type FeedbackItem, type Source, type Category } from "@/data/mock-data";
+import { sourceLabels, categoryLabels, type FeedbackItem, type Source, type Category } from "@/data/mock-data";
 import { categoryColors } from "@/data/category-styles";
 import { Plus, Search, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,9 +31,7 @@ const Data = () => {
   const addFeedback = useAddFeedback();
   const seedFeedback = useSeedFeedback();
 
-  const feedback: FeedbackItem[] = apiData?.feedback ?? initialFeedback.filter(
-    (f) => !search || f.text.toLowerCase().includes(search.toLowerCase()) || f.author.toLowerCase().includes(search.toLowerCase())
-  );
+  const feedback: FeedbackItem[] = apiData?.feedback ?? [];
 
   const handleAddFeedback = async () => {
     if (!newText.trim() || !newAuthor.trim()) {
@@ -81,6 +79,25 @@ const Data = () => {
           <p className="text-sm text-muted-foreground">{feedback.length} entries from all sources</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            onClick={async () => {
+              if (!window.confirm("Reset all D1 data? This removes feedback, insights, runs, and related analysis tables.")) return;
+              try {
+                const response = await fetch('/api/feedback/reset', { method: 'POST' });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload?.error || payload?.detail || 'Reset failed');
+                toast.success("D1 reset complete");
+                window.location.reload();
+              } catch (err: any) {
+                toast.error(err.message || "Failed to reset D1");
+              }
+            }}
+          >
+            Reset D1
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -180,7 +197,7 @@ const Data = () => {
             ) : feedback.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-center py-12 text-sm text-muted-foreground">
-                  No feedback yet. Use "Add 10 Seed Items" to get started.
+                  No feedback yet. Add feedback or seed items to get started.
                 </TableCell>
               </TableRow>
             ) : (

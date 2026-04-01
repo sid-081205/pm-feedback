@@ -2,23 +2,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, Calendar, RefreshCw, Plus, CheckCircle, Loader2, BarChart2, X } from "lucide-react";
+import { Sparkles, Calendar, RefreshCw, CheckCircle, Loader2, BarChart2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-const filterChips = [
-  "Keyword Matches", "Type", "Source Type", "Sources",
-  "Company Type", "Company Stage", "Customer Persona", "Company Persona",
-];
+type SourceFilter = "all" | "discord" | "github" | "x" | "support" | "email" | "community";
+type CategoryFilter = "all" | "feature_request" | "bug" | "praise" | "complaint" | "question";
+type DateRangeFilter = "all" | "7d" | "30d";
 
 const STEPS = [
-  "Connecting to D1 database…",
-  "Fetching feedback items…",
+  "Connecting to D1…",
+  "Fetching filtered feedback…",
   "Calling Workers AI…",
-  "Parsing AI response…",
-  "Writing insights to database…",
+  "Writing insights to D1…",
   "Complete!",
 ];
 
@@ -30,12 +29,15 @@ interface ProgressStep {
 interface AskAIDialogProps {
   open: boolean;
   onClose: () => void;
+  onRunCompleted?: (runId: string) => void;
 }
 
-export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
+export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps) {
   const [prompt, setPrompt] = useState("What are the top feature requests for product teams?");
   const [insightCount, setInsightCount] = useState([10]);
-  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
+  const [dateRange, setDateRange] = useState<DateRangeFilter>("all");
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [steps, setSteps] = useState<ProgressStep[]>([]);
@@ -44,9 +46,6 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
 
   const queryClient = useQueryClient();
-
-  const toggleFilter = (f: string) =>
-    setActiveFilters((prev) => prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]);
 
   const initSteps = () =>
     STEPS.map((label, i) => ({ label, state: i === 0 ? "active" : "pending" } as ProgressStep));
@@ -65,6 +64,28 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
     setSteps((prev) => prev.map((s) => ({ ...s, state: "done" })));
   };
 
+  const buildFilters = () => {
+    const filters: Record<string, unknown> = {};
+
+    if (sourceFilter !== "all") {
+      filters.sources = [sourceFilter];
+    }
+
+    if (categoryFilter !== "all") {
+      filters.category = categoryFilter;
+    }
+
+    if (dateRange !== "all") {
+      const now = new Date();
+      const days = dateRange === "7d" ? 7 : 30;
+      const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      filters.since = since.toISOString();
+      filters.until = now.toISOString();
+    }
+
+    return filters;
+  };
+
   const handleStartAnalysis = async () => {
     if (!prompt.trim() || isAnalyzing) return;
 
@@ -77,7 +98,11 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
       const response = await fetch('/api/analyze/direct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, insightCount: insightCount[0] }),
+        body: JSON.stringify({
+          prompt,
+          insightCount: insightCount[0],
+          filters: buildFilters(),
+        }),
       });
 
       if (!response.body) throw new Error('No response stream');
@@ -97,8 +122,13 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
+
           let event: any;
-          try { event = JSON.parse(line.slice(6)); } catch { continue; }
+          try {
+            event = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
 
           if (event.error) {
             toast.error(`Analysis failed: ${event.error}`);
@@ -114,8 +144,10 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
             completeAll();
             setInsightsGenerated(event.insightsCount ?? insightCount[0]);
             setAnalysisDone(true);
-            queryClient.invalidateQueries({ queryKey: ['insights'] });
-            queryClient.invalidateQueries({ queryKey: ['analysisSummary'] });
+            setIsAnalyzing(false);
+            queryClient.invalidateQueries({ queryKey: ["insights"] });
+            queryClient.invalidateQueries({ queryKey: ["analysisSummary"] });
+            if (event.runId) onRunCompleted?.(event.runId);
             toast.success(`${event.insightsCount} insights generated`);
           }
         }
@@ -127,16 +159,26 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
   };
 
   const dismissProgress = () => {
-    readerRef.current?.cancel();
-    setIsAnalyzing(false);
     setAnalysisDone(false);
     setSteps([]);
     setInsightsGenerated(null);
   };
 
+  const dateLabel = () => {
+    if (dateRange === "7d") return "Last 7 days";
+    if (dateRange === "30d") return "Last 30 days";
+    return "All time";
+  };
+
   useEffect(() => {
-    if (!open) dismissProgress();
-  }, [open]);
+    if (!open && !isAnalyzing && !analysisDone) dismissProgress();
+  }, [open, isAnalyzing, analysisDone]);
+
+  useEffect(() => {
+    return () => {
+      readerRef.current?.cancel().catch(() => undefined);
+    };
+  }, []);
 
   return (
     <>
@@ -168,29 +210,63 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
             <div className="flex flex-wrap items-start gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-foreground mb-2">Date Range</h3>
-                <Badge variant="outline" className="text-xs bg-secondary/50 border-border cursor-pointer">
-                  <Calendar size={12} className="mr-1" />All Time
-                </Badge>
+                <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRangeFilter)}>
+                  <SelectTrigger className="w-[160px] h-8 text-xs bg-secondary/50 border-border">
+                    <SelectValue placeholder="Date range" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All time</SelectItem>
+                    <SelectItem value="7d">Last 7 days</SelectItem>
+                    <SelectItem value="30d">Last 30 days</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-foreground mb-2">Filters</h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {filterChips.map((chip) => (
-                    <Badge
-                      key={chip}
-                      variant="outline"
-                      className={`text-xs cursor-pointer transition-colors ${
-                        activeFilters.includes(chip)
-                          ? "bg-foreground/10 border-foreground/40 text-foreground"
-                          : "bg-secondary/50 border-border text-muted-foreground hover:text-foreground"
-                      }`}
-                      onClick={() => !isAnalyzing && toggleFilter(chip)}
-                    >
-                      {chip}
-                    </Badge>
-                  ))}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as SourceFilter)}>
+                    <SelectTrigger className="h-8 text-xs bg-secondary/50 border-border">
+                      <SelectValue placeholder="Source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All sources</SelectItem>
+                      <SelectItem value="discord">Discord</SelectItem>
+                      <SelectItem value="github">GitHub</SelectItem>
+                      <SelectItem value="x">X / Twitter</SelectItem>
+                      <SelectItem value="support">Support</SelectItem>
+                      <SelectItem value="email">Email</SelectItem>
+                      <SelectItem value="community">Community</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as CategoryFilter)}>
+                    <SelectTrigger className="h-8 text-xs bg-secondary/50 border-border">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All categories</SelectItem>
+                      <SelectItem value="feature_request">Feature request</SelectItem>
+                      <SelectItem value="bug">Bug</SelectItem>
+                      <SelectItem value="praise">Praise</SelectItem>
+                      <SelectItem value="complaint">Complaint</SelectItem>
+                      <SelectItem value="question">Question</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="outline" className="text-[10px] bg-secondary/50 border-border">
+                <Calendar size={11} className="mr-1" />
+                {dateLabel()}
+              </Badge>
+              {sourceFilter !== "all" && (
+                <Badge variant="outline" className="text-[10px] bg-secondary/50 border-border">Source: {sourceFilter}</Badge>
+              )}
+              {categoryFilter !== "all" && (
+                <Badge variant="outline" className="text-[10px] bg-secondary/50 border-border">Category: {categoryFilter}</Badge>
+              )}
             </div>
 
             <div className="h-px bg-border" />
@@ -202,9 +278,6 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
                   Generate <span className="text-primary">{insightCount[0]}</span> insights
                 </h3>
                 <div className="flex items-center gap-1">
-                  <Button variant="outline" size="icon" className="h-7 w-7 border-border" disabled={isAnalyzing}>
-                    <Plus size={14} />
-                  </Button>
                   <Button
                     variant="outline" size="icon" className="h-7 w-7 border-border" disabled={isAnalyzing}
                     onClick={() => setPrompt("What are the top feature requests for product teams?")}
@@ -243,14 +316,17 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
 
       {/* Bottom-right progress popup — only shown while running */}
       {steps.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-50 w-80 rounded-xl border border-border bg-popover shadow-2xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Sparkles size={13} className="text-primary" />
-              <span className="text-xs font-semibold text-foreground">Workers AI</span>
+        <div className="fixed bottom-5 right-5 z-50 w-[360px] rounded-2xl border-2 border-cyan-400/70 bg-slate-950/95 shadow-[0_20px_60px_rgba(6,182,212,0.22)] p-4 backdrop-blur-md">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sparkles size={13} className="text-cyan-300" />
+                <span className="text-xs font-bold tracking-wide text-cyan-100 uppercase">Workers AI workflow</span>
+              </div>
+              <p className="mt-1 text-[11px] text-cyan-100/70">Analysis is running in the background. You can close the dialog and keep working.</p>
             </div>
             {analysisDone && (
-              <button onClick={dismissProgress} className="text-muted-foreground hover:text-foreground transition-colors p-0.5">
+              <button onClick={dismissProgress} className="text-cyan-100/70 hover:text-cyan-100 transition-colors p-0.5">
                 <X size={13} />
               </button>
             )}
@@ -260,19 +336,19 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
             {steps.map((step, i) => (
               <div key={i} className="flex items-center gap-2.5">
                 {step.state === "done" ? (
-                  <CheckCircle size={14} className="text-emerald-500 shrink-0" />
+                  <CheckCircle size={14} className="text-emerald-400 shrink-0" />
                 ) : step.state === "active" ? (
-                  <Loader2 size={14} className="text-white animate-spin shrink-0" />
+                  <Loader2 size={14} className="text-cyan-300 animate-spin shrink-0" />
                 ) : (
-                  <div className="w-3.5 h-3.5 rounded-full border border-muted-foreground/30 shrink-0" />
+                  <div className="w-3.5 h-3.5 rounded-full border border-cyan-300/40 shrink-0" />
                 )}
                 <span
                   className={
                     step.state === "done"
-                      ? "text-xs text-foreground font-medium"
+                      ? "text-xs text-cyan-50 font-medium"
                       : step.state === "active"
-                        ? "text-xs text-white font-semibold"
-                        : "text-xs text-muted-foreground/50"
+                        ? "text-xs text-cyan-100 font-semibold"
+                        : "text-xs text-cyan-100/50"
                   }
                 >
                   {step.label}
@@ -282,8 +358,8 @@ export function AskAIDialog({ open, onClose }: AskAIDialogProps) {
           </div>
 
           {analysisDone && insightsGenerated !== null && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <p className="text-xs font-semibold text-emerald-400">
+            <div className="mt-3 pt-3 border-t border-cyan-400/30">
+              <p className="text-xs font-semibold text-emerald-300">
                 ✓ {insightsGenerated} insights generated and saved to D1
               </p>
             </div>
