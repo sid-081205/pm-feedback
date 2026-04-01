@@ -27,6 +27,11 @@ export interface Insight {
   mentions: number;
   sources: Source[];
   sentimentScore: number; // -1 to 1
+  sentiment_label?: Sentiment;
+  urgency_score?: number;  // 0-100
+  value_score?: number;    // 0-100
+  urgency_factors?: Record<string, number>;
+  value_factors?: Record<string, number>;
   trend: number[]; // sparkline data
   feedbackIds: string[];
 }
@@ -83,48 +88,56 @@ export const initialInsights: Insight[] = [
     id: "i1", title: "Dashboard Performance Issues",
     topics: [{ label: "Page Load Speed", count: 12 }, { label: "Zone Switching", count: 8 }, { label: "UI Responsiveness", count: 5 }],
     category: "bug", mentions: 25, sources: ["community", "discord", "github", "support"],
-    sentimentScore: -0.6, trend: [3, 5, 4, 7, 6, 8, 5], feedbackIds: ["f1", "f2", "f3"],
+    sentimentScore: -0.6, sentiment_label: "negative", urgency_score: 75, value_score: 70,
+    trend: [3, 5, 4, 7, 6, 8, 5], feedbackIds: ["f1", "f2", "f3"],
   },
   {
     id: "i2", title: "Workers Developer Experience",
     topics: [{ label: "TypeScript Support", count: 15 }, { label: "Wrangler CLI", count: 11 }, { label: "D1 Bindings", count: 7 }],
     category: "feature_request", mentions: 33, sources: ["github", "x", "discord"],
-    sentimentScore: 0.1, trend: [5, 6, 8, 7, 9, 10, 12], feedbackIds: ["f4", "f5", "f6"],
+    sentimentScore: 0.1, sentiment_label: "neutral", urgency_score: 45, value_score: 85,
+    trend: [5, 6, 8, 7, 9, 10, 12], feedbackIds: ["f4", "f5", "f6"],
   },
   {
     id: "i3", title: "DNS Propagation & Record Types",
     topics: [{ label: "Propagation Speed", count: 9 }, { label: "HTTPS Records", count: 6 }, { label: "DNSSEC", count: 3 }],
     category: "feature_request", mentions: 18, sources: ["support", "community"],
-    sentimentScore: -0.2, trend: [4, 3, 5, 4, 6, 5, 4], feedbackIds: ["f7", "f8", "f9"],
+    sentimentScore: -0.2, sentiment_label: "neutral", urgency_score: 60, value_score: 65,
+    trend: [4, 3, 5, 4, 6, 5, 4], feedbackIds: ["f7", "f8", "f9"],
   },
   {
     id: "i4", title: "Zero Trust Onboarding Complexity",
     topics: [{ label: "Setup Wizard", count: 10 }, { label: "Policy Config", count: 8 }, { label: "Documentation", count: 6 }],
     category: "complaint", mentions: 24, sources: ["support", "email", "community"],
-    sentimentScore: -0.7, trend: [6, 7, 8, 9, 8, 10, 11], feedbackIds: ["f10", "f11"],
+    sentimentScore: -0.7, sentiment_label: "negative", urgency_score: 55, value_score: 75,
+    trend: [6, 7, 8, 9, 8, 10, 11], feedbackIds: ["f10", "f11"],
   },
   {
     id: "i5", title: "R2 Storage Value & Features",
     topics: [{ label: "Pricing", count: 14 }, { label: "Lifecycle Policies", count: 7 }, { label: "S3 Compatibility", count: 5 }],
     category: "praise", mentions: 26, sources: ["x", "github", "community"],
-    sentimentScore: 0.6, trend: [8, 9, 10, 11, 12, 13, 15], feedbackIds: ["f12", "f13"],
+    sentimentScore: 0.6, sentiment_label: "positive", urgency_score: 25, value_score: 80,
+    trend: [8, 9, 10, 11, 12, 13, 15], feedbackIds: ["f12", "f13"],
   },
   {
     id: "i6", title: "Pages Deployment Reliability",
     topics: [{ label: "Build Failures", count: 11 }, { label: "Silent Errors", count: 8 }, { label: "Workers Integration", count: 6 }],
     category: "bug", mentions: 25, sources: ["discord", "x", "github"],
-    sentimentScore: -0.3, trend: [5, 7, 6, 8, 7, 9, 6], feedbackIds: ["f14", "f15"],
+    sentimentScore: -0.3, sentiment_label: "neutral", urgency_score: 70, value_score: 72,
+    trend: [5, 7, 6, 8, 7, 9, 6], feedbackIds: ["f14", "f15"],
   },
   {
     id: "i7", title: "WAF & Security Rules Enhancement",
     topics: [{ label: "Custom Rules", count: 9 }, { label: "Rate Limiting", count: 7 }, { label: "Regex Support", count: 5 }],
     category: "feature_request", mentions: 21, sources: ["community", "email"],
-    sentimentScore: 0.3, trend: [3, 4, 5, 6, 5, 7, 8], feedbackIds: ["f16", "f17"],
+    sentimentScore: 0.3, sentiment_label: "positive", urgency_score: 40, value_score: 65,
+    trend: [3, 4, 5, 6, 5, 7, 8], feedbackIds: ["f16", "f17"],
   },
   {
     id: "i8", title: "API Documentation Quality",
     topics: [{ label: "v4 Endpoints", count: 12 }, { label: "Response Schema", count: 8 }, { label: "Reliability", count: 4 }],
     category: "bug", mentions: 24, sources: ["github", "support"],
-    sentimentScore: 0.1, trend: [6, 5, 7, 6, 8, 7, 9], feedbackIds: ["f18", "f19"],
+    sentimentScore: 0.1, sentiment_label: "neutral", urgency_score: 50, value_score: 60,
+    trend: [6, 5, 7, 6, 8, 7, 9], feedbackIds: ["f18", "f19"],
   },
 ];

@@ -1,15 +1,98 @@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SourceIcon } from "@/components/SourceIcon";
-import { SentimentBadge, SentimentScore } from "@/components/SentimentBadge";
-import type { Insight, FeedbackItem } from "@/data/mock-data";
+import { SentimentBadge } from "@/components/SentimentBadge";
+import type { Insight, FeedbackItem, Sentiment } from "@/data/mock-data";
 import { categoryLabels, sourceLabels } from "@/data/mock-data";
 import { categoryColors } from "@/data/category-styles";
-import { Search, Star, MessageSquare, ClipboardList } from "lucide-react";
+import { Search, Star, MessageSquare, ClipboardList, Download, Loader2, FileText } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+
+interface SurveyQuestion {
+  id: number;
+  type: "rating" | "multiple_choice" | "open_text";
+  question: string;
+  options: string[] | null;
+  rationale: string;
+}
+
+interface Survey {
+  title: string;
+  description: string;
+  questions: SurveyQuestion[];
+}
+
+function printSurveyAsPDF(survey: Survey, insightTitle: string) {
+  const win = window.open("", "_blank");
+  if (!win) { toast.error("Allow pop-ups to export the survey PDF"); return; }
+
+  const questionsHTML = survey.questions.map((q, i) => {
+    let answerHTML = "";
+    if (q.type === "rating") {
+      answerHTML = `<div class="rating-row">
+        ${[1,2,3,4,5].map((n) => `<div class="rating-box">${n}</div>`).join("")}
+        <span class="rating-label">1 = Poor &nbsp;·&nbsp; 5 = Excellent</span>
+      </div>`;
+    } else if (q.type === "multiple_choice" && q.options) {
+      answerHTML = q.options.map((opt) =>
+        `<div class="option"><span class="circle"></span>${opt}</div>`
+      ).join("");
+    } else {
+      answerHTML = `<div class="open-box"></div>`;
+    }
+    return `
+      <div class="question">
+        <div class="q-meta">Q${i + 1} &nbsp;·&nbsp; ${q.type.replace("_", " ")}</div>
+        <div class="q-text">${q.question}</div>
+        ${q.rationale ? `<div class="q-rationale">Why we're asking: ${q.rationale}</div>` : ""}
+        <div class="answer-area">${answerHTML}</div>
+      </div>`;
+  }).join("");
+
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>${survey.title}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111;padding:48px 56px;max-width:780px;margin:0 auto}
+    .header{margin-bottom:32px;padding-bottom:24px;border-bottom:2px solid #e5e7eb}
+    .header h1{font-size:22px;font-weight:700;margin-bottom:6px}
+    .header .meta{font-size:11px;color:#6b7280;margin-bottom:10px}
+    .header .desc{font-size:13px;color:#374151;line-height:1.6}
+    .question{margin:28px 0;page-break-inside:avoid}
+    .q-meta{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin-bottom:4px}
+    .q-text{font-size:15px;font-weight:500;color:#111;margin-bottom:4px;line-height:1.5}
+    .q-rationale{font-size:11px;color:#9ca3af;font-style:italic;margin-bottom:10px}
+    .answer-area{margin-top:10px}
+    .option{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px;color:#374151}
+    .circle{width:15px;height:15px;border-radius:50%;border:1.5px solid #d1d5db;flex-shrink:0}
+    .rating-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .rating-box{width:44px;height:44px;border:1.5px solid #d1d5db;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#6b7280}
+    .rating-label{font-size:11px;color:#9ca3af;margin-left:4px}
+    .open-box{width:100%;height:88px;border:1.5px solid #d1d5db;border-radius:8px;margin-top:4px}
+    .print-btn{display:inline-flex;align-items:center;gap:6px;margin-bottom:28px;padding:9px 18px;background:#111;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer}
+    .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:10px;color:#9ca3af}
+    @media print{.print-btn{display:none}@page{margin:1in}body{padding:0}}
+  </style>
+  </head><body>
+  <button class="print-btn" onclick="window.print()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+    Save as PDF
+  </button>
+  <div class="header">
+    <h1>${survey.title}</h1>
+    <div class="meta">Cloudflare Product Feedback &nbsp;·&nbsp; Insight: ${insightTitle} &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
+    <div class="desc">${survey.description}</div>
+  </div>
+  ${questionsHTML}
+  <div class="footer">Generated by Cloudflare PM Feedback · Powered by Workers AI</div>
+  </body></html>`);
+  win.document.close();
+}
 
 interface InsightDetailPanelProps {
   insight: Insight | null;
@@ -20,6 +103,9 @@ interface InsightDetailPanelProps {
 
 export function InsightDetailPanel({ insight, feedback, open, onClose }: InsightDetailPanelProps) {
   const [search, setSearch] = useState("");
+  const [survey, setSurvey] = useState<Survey | null>(null);
+  const [surveyOpen, setSurveyOpen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   if (!insight) return null;
 
@@ -27,97 +113,195 @@ export function InsightDetailPanel({ insight, feedback, open, onClose }: Insight
     .filter((f) => insight.feedbackIds.includes(f.id))
     .filter((f) => !search || f.text.toLowerCase().includes(search.toLowerCase()) || f.author.toLowerCase().includes(search.toLowerCase()));
 
+  const handleCreateSurvey = async () => {
+    setIsGenerating(true);
+    try {
+      const result: Survey = await fetch(`/api/insights/${insight.id}/survey`, {
+        method: "POST",
+      }).then((r) => r.json());
+
+      if ((result as any).error) throw new Error((result as any).error);
+      setSurvey(result);
+      setSurveyOpen(true);
+    } catch (err: any) {
+      toast.error(`Failed to generate survey: ${err.message || "Unknown error"}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
-    <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="right" className="w-full sm:max-w-xl bg-card border-l border-border overflow-y-auto">
-        <SheetHeader className="pb-4">
-          <div className="flex items-start justify-between gap-2">
-            <SheetTitle className="text-lg text-foreground">{insight.title}</SheetTitle>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap mt-2">
-            <Badge className={cn("text-xs rounded-full font-medium px-2.5", categoryColors[insight.category])}>
-              {categoryLabels[insight.category]}
-            </Badge>
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <MessageSquare size={12} /> {insight.mentions} mentions
-            </span>
-            <SentimentScore score={insight.sentimentScore} />
-          </div>
-        </SheetHeader>
-
-        {/* Topics */}
-        <div className="mb-4">
-          <h3 className="text-xs font-semibold text-muted-foreground mb-2">Topics</h3>
-          <div className="flex flex-wrap gap-1.5">
-            {insight.topics.map((t) => (
-              <Badge key={t.label} variant="outline" className="text-xs bg-secondary/50">
-                {t.label} <span className="ml-1 text-muted-foreground">({t.count})</span>
-              </Badge>
-            ))}
-          </div>
-        </div>
-
-        {/* Sources */}
-        <div className="mb-4">
-          <h3 className="text-xs font-semibold text-muted-foreground mb-2">Sources</h3>
-          <div className="flex gap-2">
-            {insight.sources.map((s) => (
-              <div key={s} className="flex items-center gap-1 text-xs text-muted-foreground">
-                <SourceIcon source={s} size={14} />
-                <span>{sourceLabels[s]}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Create Survey */}
-        <div className="mb-4">
-          <Button variant="outline" className="w-full gap-2 border-border text-sm">
-            <ClipboardList size={14} />
-            Create Survey from Insight
-          </Button>
-        </div>
-        {/* Search */}
-        <div className="relative mb-4">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search feedback..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8 h-8 text-sm bg-secondary/50 border-border"
-          />
-        </div>
-
-        {/* Feedback list */}
-        <div className="space-y-3">
-          {relatedFeedback.map((f) => (
-            <div key={f.id} className="rounded-lg border border-border bg-background p-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <SourceIcon source={f.source} size={14} />
-                  <span className="text-xs font-medium text-foreground">{f.author}</span>
-                </div>
-                <span className="text-[11px] text-muted-foreground">{f.date}</span>
-              </div>
-              <p className="text-sm text-secondary-foreground leading-relaxed">{f.text}</p>
-              <div className="flex items-center justify-between mt-2">
-                <SentimentBadge sentiment={f.sentiment} />
-                {f.rating && (
-                  <div className="flex items-center gap-0.5">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star
-                        key={i}
-                        size={12}
-                        className={i < f.rating! ? "text-warning fill-warning" : "text-muted-foreground/30"}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
+    <>
+      <Sheet open={open} onOpenChange={onClose}>
+        <SheetContent side="right" className="w-full sm:max-w-xl bg-card border-l border-border overflow-y-auto">
+          <SheetHeader className="pb-4">
+            <div className="flex items-start justify-between gap-2">
+              <SheetTitle className="text-lg text-foreground">{insight.title}</SheetTitle>
             </div>
-          ))}
-        </div>
-      </SheetContent>
-    </Sheet>
+            <div className="flex items-center gap-2 flex-wrap mt-2">
+              <Badge className={cn("text-xs rounded-full font-medium px-2.5", categoryColors[insight.category])}>
+                {categoryLabels[insight.category]}
+              </Badge>
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <MessageSquare size={12} /> {insight.mentions} mentions
+              </span>
+              {insight.sentiment_label && (
+                <SentimentBadge sentiment={insight.sentiment_label as Sentiment} />
+              )}
+              {insight.urgency_score != null && (
+                <span className="text-xs text-muted-foreground font-mono">
+                  U:{insight.urgency_score} V:{insight.value_score}
+                </span>
+              )}
+            </div>
+          </SheetHeader>
+
+          {/* Topics */}
+          <div className="mb-4">
+            <h3 className="text-xs font-semibold text-muted-foreground mb-2">Topics</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {insight.topics.map((t) => (
+                <Badge key={t.label} variant="outline" className="text-xs bg-secondary/50">
+                  {t.label} <span className="ml-1 text-muted-foreground">({t.count})</span>
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          {/* Sources */}
+          <div className="mb-4">
+            <h3 className="text-xs font-semibold text-muted-foreground mb-2">Sources</h3>
+            <div className="flex gap-2">
+              {insight.sources.map((s) => (
+                <div key={s} className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <SourceIcon source={s} size={14} />
+                  <span>{sourceLabels[s]}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Create Survey */}
+          <div className="mb-4">
+            <Button
+              variant="outline"
+              className="w-full gap-2 border-border text-sm"
+              onClick={handleCreateSurvey}
+              disabled={isGenerating}
+            >
+              {isGenerating
+                ? <><Loader2 size={14} className="animate-spin" /> Generating survey…</>
+                : <><ClipboardList size={14} /> Create Survey from Insight</>}
+            </Button>
+          </div>
+
+          {/* Search */}
+          <div className="relative mb-4">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search feedback..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8 h-8 text-sm bg-secondary/50 border-border"
+            />
+          </div>
+
+          {/* Feedback list */}
+          <div className="space-y-3">
+            {relatedFeedback.map((f) => (
+              <div key={f.id} className="rounded-lg border border-border bg-background p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <SourceIcon source={f.source} size={14} />
+                    <span className="text-xs font-medium text-foreground">{f.author}</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">{f.date}</span>
+                </div>
+                <p className="text-sm text-secondary-foreground leading-relaxed">{f.text}</p>
+                <div className="flex items-center justify-between mt-2">
+                  <SentimentBadge sentiment={f.sentiment} />
+                  {f.rating && (
+                    <div className="flex items-center gap-0.5">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          size={12}
+                          className={i < f.rating! ? "text-warning fill-warning" : "text-muted-foreground/30"}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Survey Dialog */}
+      {survey && (
+        <Dialog open={surveyOpen} onOpenChange={setSurveyOpen}>
+          <DialogContent className="sm:max-w-2xl bg-card border-border max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="text-foreground flex items-center gap-2">
+                <FileText size={16} />
+                {survey.title}
+              </DialogTitle>
+              <p className="text-xs text-muted-foreground mt-1">{survey.description}</p>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+              {survey.questions.map((q, i) => (
+                <div key={q.id} className="rounded-lg border border-border bg-secondary/20 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Q{i + 1} · {q.type.replace("_", " ")}
+                    </span>
+                  </div>
+                  <p className="text-sm font-medium text-foreground mb-1">{q.question}</p>
+                  {q.rationale && (
+                    <p className="text-[11px] text-muted-foreground italic mb-3">Why: {q.rationale}</p>
+                  )}
+
+                  {q.type === "rating" && (
+                    <div className="flex gap-2 items-center">
+                      {[1,2,3,4,5].map((n) => (
+                        <div key={n} className="w-9 h-9 rounded-md border border-border flex items-center justify-center text-sm text-muted-foreground">
+                          {n}
+                        </div>
+                      ))}
+                      <span className="text-[10px] text-muted-foreground ml-2">1 = Poor · 5 = Excellent</span>
+                    </div>
+                  )}
+                  {q.type === "multiple_choice" && q.options && (
+                    <div className="space-y-1.5">
+                      {q.options.map((opt) => (
+                        <div key={opt} className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <div className="w-3.5 h-3.5 rounded-full border border-border shrink-0" />
+                          {opt}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {q.type === "open_text" && (
+                    <div className="h-16 rounded-md border border-border bg-background" />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-4 border-t border-border flex justify-end">
+              <Button
+                className="gap-2"
+                onClick={() => printSurveyAsPDF(survey, insight.title)}
+              >
+                <Download size={14} />
+                Export as PDF
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

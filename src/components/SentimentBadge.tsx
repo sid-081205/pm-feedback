@@ -3,10 +3,10 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 const sentimentStyles: Record<Sentiment, string> = {
-  positive: "border border-foreground/30 bg-foreground/15 text-foreground",
-  negative: "border border-foreground/20 bg-foreground/10 text-foreground",
-  neutral: "border border-muted-foreground/30 bg-muted text-muted-foreground",
-  mixed: "border border-foreground/20 bg-foreground/10 text-foreground",
+  positive: "border border-green-500/40 bg-green-500/15 text-green-600 dark:text-green-400",
+  negative: "border border-red-500/40 bg-red-500/15 text-red-600 dark:text-red-400",
+  neutral:  "border border-muted-foreground/30 bg-muted text-muted-foreground",
+  mixed:    "border border-amber-500/40 bg-amber-500/15 text-amber-600 dark:text-amber-400",
 };
 
 export function SentimentBadge({ sentiment }: { sentiment: Sentiment }) {
@@ -17,7 +17,7 @@ export function SentimentBadge({ sentiment }: { sentiment: Sentiment }) {
   );
 }
 
-export function SentimentScore({ score }: { score: number }) {
-  const label = score > 0 ? `+${(score * 100).toFixed(0)}` : `${(score * 100).toFixed(0)}`;
-  return <span className="font-mono text-sm font-bold text-foreground">{label}</span>;
+export function SentimentScore({ score, label }: { score: number; label?: Sentiment }) {
+  const sentiment: Sentiment = label ?? (score > 0.2 ? "positive" : score < -0.2 ? "negative" : "neutral");
+  return <SentimentBadge sentiment={sentiment} />;
 }

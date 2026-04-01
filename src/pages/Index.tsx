@@ -4,15 +4,31 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SourceIcon } from "@/components/SourceIcon";
-import { SentimentScore } from "@/components/SentimentBadge";
+import { SentimentBadge } from "@/components/SentimentBadge";
 import { SparkLine } from "@/components/SparkLine";
 import { InsightDetailPanel } from "@/components/InsightDetailPanel";
 import { AskAIDialog } from "@/components/AskAIDialog";
-import { initialInsights, initialFeedback, categoryLabels, type Insight, type Source, type Category } from "@/data/mock-data";
+import { AskAISimpleDialog } from "@/components/AskAISimpleDialog";
+import { useInsights } from "@/hooks/use-insights";
+import { useFeedback } from "@/hooks/use-feedback";
+import { initialInsights, initialFeedback, categoryLabels, type Insight, type Source, type Category, type Sentiment } from "@/data/mock-data";
 import { categoryColors } from "@/data/category-styles";
-import { Search, Sparkles } from "lucide-react";
+import { Search, Sparkles, BarChart2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+function ScoreCell({ score }: { score: number }) {
+  return (
+    <span className="font-mono text-xs text-muted-foreground">
+      {score}
+    </span>
+  );
+}
+
+const URGENCY_TOOLTIP = "Urgency (0–100) is derived from: frequency velocity, source diversity, sentiment intensity, keyword signals, and event correlation.";
+const VALUE_TOOLTIP = "Value (0–100) is derived from: impact breadth, segment weight, revenue keywords, effort estimate, and unique author ratio.";
+const SENTIMENT_TOOLTIP = "Sentiment is calculated with Workers AI using @cf/meta/llama-3.1-8b-instruct.";
 
 const Index = () => {
   const [search, setSearch] = useState("");
@@ -20,8 +36,14 @@ const Index = () => {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [selectedInsight, setSelectedInsight] = useState<Insight | null>(null);
   const [askAIOpen, setAskAIOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
 
-  const filteredInsights = useMemo(() => {
+  const { data: apiData, isLoading } = useInsights({ search, source: sourceFilter, category: categoryFilter });
+  const { data: feedbackData } = useFeedback();
+
+  // Use API data when available, fall back to filtered mock data
+  const insights = useMemo(() => {
+    if (apiData?.insights) return apiData.insights;
     return initialInsights.filter((insight) => {
       const matchSearch = !search || insight.title.toLowerCase().includes(search.toLowerCase()) ||
         insight.topics.some((t) => t.label.toLowerCase().includes(search.toLowerCase()));
@@ -29,7 +51,9 @@ const Index = () => {
       const matchCategory = categoryFilter === "all" || insight.category === categoryFilter;
       return matchSearch && matchSource && matchCategory;
     });
-  }, [search, sourceFilter, categoryFilter]);
+  }, [apiData, search, sourceFilter, categoryFilter]);
+
+  const allFeedback = feedbackData?.feedback ?? initialFeedback;
 
   return (
     <div className="p-6">
@@ -38,10 +62,16 @@ const Index = () => {
           <h1 className="text-2xl font-bold text-foreground mb-1">Insights</h1>
           <p className="text-sm text-muted-foreground">Aggregated themes from product feedback across all channels</p>
         </div>
-        <Button variant="outline" className="gap-2 border-border" onClick={() => setAskAIOpen(true)}>
-          <Sparkles size={14} />
-          Ask AI
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="gap-2 border-border" onClick={() => setAskAIOpen(true)}>
+            <Sparkles size={14} />
+            Ask AI
+          </Button>
+          <Button className="gap-2" onClick={() => setGenerateOpen(true)}>
+            <BarChart2 size={14} />
+            Generate Insights
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -92,67 +122,103 @@ const Index = () => {
               <TableHead className="text-xs font-semibold text-muted-foreground">Insight</TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Topics</TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Category</TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground text-center">Mentions</TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground">Sources</TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground text-center">
+                <Tooltip>
+                  <TooltipTrigger className="flex items-center gap-1 mx-auto cursor-help">
+                    Urgency <Info size={11} className="text-muted-foreground/60" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">{URGENCY_TOOLTIP}</TooltipContent>
+                </Tooltip>
+              </TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground text-center">
+                <Tooltip>
+                  <TooltipTrigger className="flex items-center gap-1 mx-auto cursor-help">
+                    Value <Info size={11} className="text-muted-foreground/60" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">{VALUE_TOOLTIP}</TooltipContent>
+                </Tooltip>
+              </TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground">
+                <Tooltip>
+                  <TooltipTrigger className="flex items-center gap-1 cursor-help">
+                    Sentiment <Info size={11} className="text-muted-foreground/60" />
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">{SENTIMENT_TOOLTIP}</TooltipContent>
+                </Tooltip>
+              </TableHead>
               <TableHead className="text-xs font-semibold text-muted-foreground">Trend</TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground text-right">Sentiment</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredInsights.map((insight) => (
-              <TableRow
-                key={insight.id}
-                className="cursor-pointer border-b border-border hover:bg-secondary/50 transition-colors"
-                onClick={() => setSelectedInsight(insight)}
-              >
-                <TableCell className="font-medium text-foreground">{insight.title}</TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {insight.topics.slice(0, 2).map((t) => (
-                      <Badge key={t.label} variant="outline" className="text-[10px] bg-secondary/50 border-border text-muted-foreground">
-                        {t.label}
-                      </Badge>
-                    ))}
-                    {insight.topics.length > 2 && (
-                      <Badge variant="outline" className="text-[10px] bg-secondary/50 border-border text-muted-foreground">
-                        +{insight.topics.length - 2}
-                      </Badge>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge className={cn("text-[10px] rounded-full font-medium px-2.5", categoryColors[insight.category])}>
-                    {categoryLabels[insight.category]}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-center text-sm text-muted-foreground font-mono">{insight.mentions}</TableCell>
-                <TableCell>
-                  <div className="flex gap-1">
-                    {insight.sources.map((s) => (
-                      <SourceIcon key={s} source={s} size={14} />
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <SparkLine data={insight.trend} />
-                </TableCell>
-                <TableCell className="text-right">
-                  <SentimentScore score={insight.sentimentScore} />
-                </TableCell>
-              </TableRow>
-            ))}
+            {isLoading && !apiData ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <TableRow key={i} className="border-b border-border">
+                  <TableCell colSpan={7}>
+                    <div className="h-4 bg-secondary/50 rounded animate-pulse" />
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              insights.map((insight) => (
+                <TableRow
+                  key={insight.id}
+                  className="cursor-pointer border-b border-border hover:bg-secondary/50 transition-colors"
+                  onClick={() => setSelectedInsight(insight)}
+                >
+                  <TableCell className="font-medium text-foreground">{insight.title}</TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {insight.topics.slice(0, 2).map((t) => (
+                        <Badge key={t.label} variant="outline" className="text-[10px] bg-secondary/50 border-border text-muted-foreground">
+                          {t.label}
+                        </Badge>
+                      ))}
+                      {insight.topics.length > 2 && (
+                        <Badge variant="outline" className="text-[10px] bg-secondary/50 border-border text-muted-foreground">
+                          +{insight.topics.length - 2}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={cn("text-[10px] rounded-full font-medium px-2.5", categoryColors[insight.category])}>
+                      {categoryLabels[insight.category]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {insight.urgency_score != null
+                      ? <ScoreCell score={insight.urgency_score} />
+                      : <span className="text-muted-foreground text-xs">—</span>}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {insight.value_score != null
+                      ? <ScoreCell score={insight.value_score} />
+                      : <span className="text-muted-foreground text-xs">—</span>}
+                  </TableCell>
+                  <TableCell>
+                    {insight.sentiment_label
+                      ? <SentimentBadge sentiment={insight.sentiment_label as Sentiment} />
+                      : <span className="text-muted-foreground text-xs">—</span>}
+                  </TableCell>
+                  <TableCell>
+                    <SparkLine data={insight.trend} />
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
 
       <InsightDetailPanel
         insight={selectedInsight}
-        feedback={initialFeedback}
+        feedback={allFeedback}
         open={!!selectedInsight}
         onClose={() => setSelectedInsight(null)}
       />
 
-      <AskAIDialog open={askAIOpen} onClose={() => setAskAIOpen(false)} />
+      <AskAISimpleDialog open={askAIOpen} onClose={() => setAskAIOpen(false)} />
+      <AskAIDialog open={generateOpen} onClose={() => setGenerateOpen(false)} />
     </div>
   );
 };
