@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from "react";
 import { Sparkles, Calendar, RefreshCw, CheckCircle, Loader2, BarChart2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { setLatestAnalysisRunId } from "@/lib/analysis-dialog-store";
 
 type SourceFilter = "all" | "discord" | "github" | "x" | "support" | "email" | "community";
 type CategoryFilter = "all" | "feature_request" | "bug" | "praise" | "complaint" | "question";
@@ -43,6 +44,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
   const [steps, setSteps] = useState<ProgressStep[]>([]);
   const [analysisDone, setAnalysisDone] = useState(false);
   const [insightsGenerated, setInsightsGenerated] = useState<number | null>(null);
+  const [popupVisible, setPopupVisible] = useState(true);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
 
   const queryClient = useQueryClient();
@@ -93,6 +95,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
     setAnalysisDone(false);
     setInsightsGenerated(null);
     setSteps(initSteps());
+    setPopupVisible(true);
 
     try {
       const response = await fetch('/api/analyze/direct', {
@@ -147,7 +150,10 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
             setIsAnalyzing(false);
             queryClient.invalidateQueries({ queryKey: ["insights"] });
             queryClient.invalidateQueries({ queryKey: ["analysisSummary"] });
-            if (event.runId) onRunCompleted?.(event.runId);
+            if (event.runId) {
+              setLatestAnalysisRunId(event.runId);
+              onRunCompleted?.(event.runId);
+            }
             toast.success(`${event.insightsCount} insights generated`);
           }
         }
@@ -159,9 +165,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
   };
 
   const dismissProgress = () => {
-    setAnalysisDone(false);
-    setSteps([]);
-    setInsightsGenerated(null);
+    setPopupVisible(false);
   };
 
   const dateLabel = () => {
@@ -183,7 +187,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
-        <DialogContent className="sm:max-w-[600px] bg-card border-border max-h-[90vh] flex flex-col">
+        <DialogContent className="sm:max-w-[600px] bg-card border-border max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-foreground flex items-center gap-2">
               <BarChart2 size={16} />
@@ -191,7 +195,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-5 pt-2 overflow-y-auto flex-1">
+          <div className="space-y-5 pt-2 overflow-y-auto flex-1 min-h-0 pr-1">
             {/* Prompt */}
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-2">Prompt</h3>
@@ -315,7 +319,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
       </Dialog>
 
       {/* Bottom-right progress popup — only shown while running */}
-      {steps.length > 0 && (
+      {steps.length > 0 && popupVisible && (
         <div className="fixed bottom-5 right-5 z-50 w-[360px] rounded-2xl border-2 border-cyan-400/70 bg-slate-950/95 shadow-[0_20px_60px_rgba(6,182,212,0.22)] p-4 backdrop-blur-md">
           <div className="flex items-start justify-between mb-4">
             <div>
@@ -325,11 +329,9 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
               </div>
               <p className="mt-1 text-[11px] text-cyan-100/70">Analysis is running in the background. You can close the dialog and keep working.</p>
             </div>
-            {analysisDone && (
-              <button onClick={dismissProgress} className="text-cyan-100/70 hover:text-cyan-100 transition-colors p-0.5">
+            <button onClick={dismissProgress} className="text-cyan-100/70 hover:text-cyan-100 transition-colors p-0.5">
                 <X size={13} />
-              </button>
-            )}
+            </button>
           </div>
 
           <div className="space-y-2.5">
@@ -357,7 +359,7 @@ export function AskAIDialog({ open, onClose, onRunCompleted }: AskAIDialogProps)
             ))}
           </div>
 
-          {analysisDone && insightsGenerated !== null && (
+          {analysisDone && insightsGenerated !== null && popupVisible && (
             <div className="mt-3 pt-3 border-t border-cyan-400/30">
               <p className="text-xs font-semibold text-emerald-300">
                 ✓ {insightsGenerated} insights generated and saved to D1

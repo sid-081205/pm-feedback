@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SourceIcon } from "@/components/SourceIcon";
 import { SentimentBadge } from "@/components/SentimentBadge";
-import { SparkLine } from "@/components/SparkLine";
 import { InsightDetailPanel } from "@/components/InsightDetailPanel";
 import { AskAIDialog } from "@/components/AskAIDialog";
 import { AskAISimpleDialog } from "@/components/AskAISimpleDialog";
@@ -17,10 +16,11 @@ import { categoryLabels, type Insight, type Sentiment } from "@/data/mock-data";
 import { categoryColors } from "@/data/category-styles";
 import { Search, Sparkles, BarChart2, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { openAnalysisDialog, useLatestAnalysisRunId } from "@/lib/analysis-dialog-store";
 
 function ScoreCell({ score }: { score: number }) {
   return (
-    <span className="font-mono text-xs text-muted-foreground">
+    <span className="inline-flex min-w-10 items-center justify-center rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-sm font-extrabold text-primary shadow-sm">
       {score}
     </span>
   );
@@ -30,20 +30,23 @@ const URGENCY_TOOLTIP = "Urgency (0–100) is derived from: frequency velocity, 
 const VALUE_TOOLTIP = "Value (0–100) is derived from: impact breadth, segment weight, revenue keywords, effort estimate, and unique author ratio.";
 const SENTIMENT_TOOLTIP = "Sentiment is calculated with Workers AI using @cf/meta/llama-3.1-8b-instruct.";
 
+type SortKey = "urgency" | "value" | "sentiment" | "users";
+
 const Index = () => {
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SortKey>("urgency");
   const [selectedInsight, setSelectedInsight] = useState<Insight | null>(null);
   const [askAIOpen, setAskAIOpen] = useState(false);
-  const [generateOpen, setGenerateOpen] = useState(false);
+  const activeRunId = useLatestAnalysisRunId();
 
   const { data: apiData, isLoading } = useInsights({
     search,
     source: sourceFilter,
     category: categoryFilter,
     runId: activeRunId ?? undefined,
+    sortBy,
   });
   const { data: feedbackData } = useFeedback();
 
@@ -63,7 +66,7 @@ const Index = () => {
             <Sparkles size={14} />
             Ask AI
           </Button>
-          <Button className="gap-2" onClick={() => setGenerateOpen(true)}>
+          <Button className="gap-2" onClick={() => openAnalysisDialog()}>
             <BarChart2 size={14} />
             Generate Insights
           </Button>
@@ -108,6 +111,17 @@ const Index = () => {
             <SelectItem value="question">Question</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={sortBy} onValueChange={(value) => setSortBy(value as SortKey)}>
+          <SelectTrigger className="w-[190px] h-9 text-sm bg-secondary/50 border-border">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="urgency">Sort by urgency</SelectItem>
+            <SelectItem value="value">Sort by value</SelectItem>
+            <SelectItem value="sentiment">Sort by sentiment</SelectItem>
+            <SelectItem value="users">Sort by no. of users</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Table */}
@@ -142,7 +156,7 @@ const Index = () => {
                   <TooltipContent className="max-w-xs text-xs">{SENTIMENT_TOOLTIP}</TooltipContent>
                 </Tooltip>
               </TableHead>
-              <TableHead className="text-xs font-semibold text-muted-foreground">Trend</TableHead>
+              <TableHead className="text-xs font-semibold text-muted-foreground text-center">Related feedback</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -202,8 +216,11 @@ const Index = () => {
                       ? <SentimentBadge sentiment={insight.sentiment_label as Sentiment} />
                       : <span className="text-muted-foreground text-xs">—</span>}
                   </TableCell>
-                  <TableCell>
-                    <SparkLine data={insight.trend} />
+                  <TableCell className="text-center">
+                    <div className="inline-flex flex-col items-center rounded-lg border border-border bg-secondary/30 px-3 py-1.5">
+                      <span className="text-base font-bold text-foreground">{insight.mentions}</span>
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">items</span>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -220,14 +237,6 @@ const Index = () => {
       />
 
       <AskAISimpleDialog open={askAIOpen} onClose={() => setAskAIOpen(false)} />
-      <AskAIDialog
-        open={generateOpen}
-        onClose={() => setGenerateOpen(false)}
-        onRunCompleted={(runId) => {
-          setActiveRunId(runId);
-          setSelectedInsight(null);
-        }}
-      />
     </div>
   );
 };

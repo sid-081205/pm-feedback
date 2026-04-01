@@ -12,12 +12,14 @@ export function useInsights(filters?: {
   source?: string;
   category?: string;
   runId?: string;
+  sortBy?: 'urgency' | 'value' | 'sentiment' | 'users';
 }) {
   const params = new URLSearchParams();
   if (filters?.search)   params.set('search', filters.search);
   if (filters?.source && filters.source !== 'all')   params.set('source', filters.source);
   if (filters?.category && filters.category !== 'all') params.set('category', filters.category);
   if (filters?.runId) params.set('runId', filters.runId);
+  if (filters?.sortBy) params.set('sort', filters.sortBy);
   params.set('limit', '100');
 
   return useQuery<InsightsResponse>({

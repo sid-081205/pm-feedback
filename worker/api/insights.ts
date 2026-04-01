@@ -105,6 +105,7 @@ ${feedbackSamples}`,
     const source = url.searchParams.get('source') || '';
     const category = url.searchParams.get('category') || '';
     const runId = url.searchParams.get('runId') || '';
+    const sort = url.searchParams.get('sort') || 'urgency';
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
     const cursor = url.searchParams.get('cursor') || '';
 
@@ -123,7 +124,16 @@ ${feedbackSamples}`,
     }
     if (cursor) { q += ' AND i.created_at < ?'; params.push(cursor); }
 
-    q += ` GROUP BY i.id ORDER BY i.urgency_score DESC, i.created_at DESC LIMIT ?`;
+    const orderBy =
+      sort === 'value'
+        ? 'COALESCE(i.value_score, 0) DESC, COALESCE(i.urgency_score, 0) DESC, COUNT(DISTINCT lnk.feedback_id) DESC, i.created_at DESC'
+        : sort === 'sentiment'
+          ? 'COALESCE(i.sentiment_score, 0) DESC, COALESCE(i.urgency_score, 0) DESC, COALESCE(i.value_score, 0) DESC, i.created_at DESC'
+          : sort === 'users'
+            ? 'COUNT(DISTINCT lnk.feedback_id) DESC, COALESCE(i.urgency_score, 0) DESC, COALESCE(i.value_score, 0) DESC, i.created_at DESC'
+            : 'COALESCE(i.urgency_score, 0) DESC, COALESCE(i.value_score, 0) DESC, COUNT(DISTINCT lnk.feedback_id) DESC, i.created_at DESC';
+
+    q += ` GROUP BY i.id ORDER BY ${orderBy} LIMIT ?`;
     params.push(limit + 1);
 
     const result = await env.DB.prepare(q).bind(...params).all();

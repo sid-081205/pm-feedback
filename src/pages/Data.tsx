@@ -14,6 +14,7 @@ import { categoryColors } from "@/data/category-styles";
 import { Plus, Search, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { setLatestAnalysisRunId } from "@/lib/analysis-dialog-store";
 
 const Data = () => {
   const [search, setSearch] = useState("");
@@ -89,6 +90,7 @@ const Data = () => {
                 const response = await fetch('/api/feedback/reset', { method: 'POST' });
                 const payload = await response.json();
                 if (!response.ok) throw new Error(payload?.error || payload?.detail || 'Reset failed');
+                setLatestAnalysisRunId(null);
                 toast.success("D1 reset complete");
                 window.location.reload();
               } catch (err: any) {

@@ -1,4 +1,6 @@
 import { NavLink } from "@/components/NavLink";
+import { AskAIDialog } from "@/components/AskAIDialog";
+import { closeAnalysisDialog, useAnalysisDialogOpen } from "@/lib/analysis-dialog-store";
 
 const navItems = [
   { title: "Insights", url: "/" },
@@ -7,6 +9,8 @@ const navItems = [
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
+  const generateOpen = useAnalysisDialogOpen();
+
   return (
     <div className="min-h-screen flex flex-col w-full">
       <header className="h-12 flex items-center justify-between border-b border-border px-6 shrink-0">
@@ -26,6 +30,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
       </header>
       <main className="flex-1 overflow-auto">{children}</main>
+      <AskAIDialog open={generateOpen} onClose={closeAnalysisDialog} />
     </div>
   );
 }
